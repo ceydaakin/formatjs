@@ -512,3 +512,18 @@ fn abi_warm_formatter_reads_replacement_locale_names() {
     assert_eq!(registry.load(0, &data.to_string()), 0);
     assert!(handle.query(query).unwrap().contains("Changed"));
 }
+#[test]
+fn hidden_day_period_boundary_keeps_shared_date_in_range() {
+    let registry = Registry::new();
+    let handle = formatter(
+        &registry,
+        json!({"hour12":false}),
+        json!({"weekday":"short","day":"numeric","month":"short","hour":"2-digit","minute":"2-digit"}),
+    );
+    // 20:00 -> 21:15 UTC crosses the en evening1 -> night1 boundary.
+    let text = handle
+        .query(json!({"op":"range","first":{"type":"number","value":"1793995200000"},"second":{"type":"number","value":"1793999700000"}}))
+        .unwrap();
+    assert_eq!(text.matches("Nov").count(), 1, "{text}");
+    assert!(text.contains("20:00") && text.contains("21:15"), "{text}");
+}

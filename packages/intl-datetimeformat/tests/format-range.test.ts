@@ -495,6 +495,32 @@ test('GH issue #4535 - longer same day range should not duplicate date', functio
   expect(result).toBe('Wed, 18 Feb 2026, 07:00\u201316:00')
 })
 
+test('GH issue #7868 - hidden day period boundary should not duplicate date', function () {
+  const dtf = new DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Amsterdam',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  // evening -> night (21:00) and afternoon -> evening (18:00) in en-GB
+  expect(
+    dtf.formatRange(
+      new Date('2026-11-06T19:00:00Z'),
+      new Date('2026-11-06T20:15:00Z')
+    )
+  ).toBe('Fri 6 Nov, 20:00\u201321:15')
+  expect(
+    dtf.formatRange(
+      new Date('2026-11-06T16:30:00Z'),
+      new Date('2026-11-06T17:15:00Z')
+    )
+  ).toBe('Fri 6 Nov, 17:30\u201318:15')
+})
+
 test('GH issue #4535 - midnight should be 00:00 not 24:00 on next day', function () {
   const dtf = new DateTimeFormat('en-GB', {
     weekday: 'short',

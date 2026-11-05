@@ -77,7 +77,9 @@ export function PartitionDateTimeRangePattern(
   const {pattern, rangePatterns} = internalSlots
   const parts = PartitionPattern<IntlDateTimeFormatPartType>(pattern)
   let lastField = -1
+  let displaysDayPeriod = false
   for (const part of parts) {
+    if (part.type === 'dayPeriod') displaysDayPeriod = true
     const field =
       part.type === 'weekday'
         ? 'day'
@@ -114,6 +116,9 @@ export function PartitionDateTimeRangePattern(
       // Step 15.d.ii: noon starts at hour 12, including an 11 AM endpoint.
       equal = tm1.hour < 12 === tm2.hour < 12
     } else if (field === 'dayPeriod') {
+      // A hidden flexible day period (e.g. evening -> night with Hm) must not
+      // force the fallback; the hour comparison still splits the range.
+      if (!displaysDayPeriod) continue
       const first = getDayPeriodName(
         dataLocaleData,
         tm1,

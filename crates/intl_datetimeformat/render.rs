@@ -520,7 +520,11 @@ impl RangeSnapshot {
             "second",
             "fractionalSecondDigits",
         ];
-        let last = partition(&profile.pattern)?
+        let tokens = partition(&profile.pattern)?;
+        let displays_day_period = tokens
+            .iter()
+            .any(|part| matches!(part, Token::Field("dayPeriod")));
+        let last = tokens
             .iter()
             .filter_map(|part| {
                 let Token::Field(name) = part else {
@@ -542,6 +546,8 @@ impl RangeSnapshot {
                     "month" => first.fields.month == second.fields.month,
                     "day" => first.fields.day == second.fields.day,
                     "ampm" => (first.civil.hour < 12) == (second.civil.hour < 12),
+                    // A hidden flexible day period must not force the fallback.
+                    "dayPeriod" if !displays_day_period => true,
                     "dayPeriod" => {
                         let width = profile.components.day_period.unwrap_or(TextWidth::Short);
                         day_period(&self.locale.metadata, first.civil, width)
