@@ -122,29 +122,95 @@ fn find_brace_syntax_end(bytes: &[u8], index: usize) -> usize {
     }
 }
 
+/// Escape flags for the apostrophes at the edges of a literal element.
+#[derive(Clone, Copy)]
+struct LiteralEdges {
+    escape_start: bool,
+    escape_end: bool,
+}
+
+/// Writes unquoted literal text, doubling each run of apostrophes that the
+/// parser would otherwise read as an escape or a quote start: runs of two or
+/// more (`''` reads back as one `'`), runs before `<` or `>`, and runs at an
+/// edge that touches syntax (a quoted span, an argument or a tag).
+fn write_literal_apostrophes(out: &mut String, text: &str, escape_start: bool, escape_end: bool) {
+    let bytes = text.as_bytes();
+    let mut segment_start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\'' {
+            i += 1;
+            continue;
+        }
+        let mut end = i;
+        while end < bytes.len() && bytes[end] == b'\'' {
+            end += 1;
+        }
+        let next = bytes.get(end).copied();
+        let must_double = end - i > 1
+            || next == Some(b'<')
+            || next == Some(b'>')
+            || (i == 0 && escape_start)
+            || (end == bytes.len() && escape_end);
+        out.push_str(&text[segment_start..end]);
+        if must_double {
+            out.push_str(&text[i..end]);
+        }
+        segment_start = end;
+        i = end;
+    }
+    out.push_str(&text[segment_start..]);
+}
+
+fn write_unquoted_literal(
+    out: &mut String,
+    literal: &str,
+    literal_start: usize,
+    followed_by_syntax: Option<bool>,
+    literal_edges: Option<LiteralEdges>,
+) {
+    let Some(edges) = literal_edges else {
+        out.push_str(literal);
+        if followed_by_syntax.is_some() && literal.ends_with('\'') {
+            out.push('\'');
+        }
+        return;
+    };
+    let escape_start = if literal_start == 0 {
+        edges.escape_start
+    } else {
+        true
+    };
+    let escape_end = followed_by_syntax.unwrap_or(edges.escape_end);
+    write_literal_apostrophes(out, literal, escape_start, escape_end);
+}
+
 fn flush_quoted_syntax_token(
     out: &mut String,
     message: &str,
     literal_start: &mut usize,
     quoted_start: &mut Option<usize>,
     quoted_end: usize,
+    literal_edges: Option<LiteralEdges>,
 ) {
     let Some(start) = *quoted_start else {
         return;
     };
 
     let literal = &message[*literal_start..start];
-    out.push_str(literal);
-    if literal.ends_with('\'') {
-        out.push('\'');
-    }
+    write_unquoted_literal(out, literal, *literal_start, Some(true), literal_edges);
     write_quoted_syntax_token(out, &message[start..quoted_end]);
     *literal_start = quoted_end;
     *quoted_start = None;
 }
 
 /// Escapes ICU syntax tokens in a literal message string.
-fn write_escaped_message(out: &mut String, message: &str, is_in_plural: bool) {
+fn write_escaped_message(
+    out: &mut String,
+    message: &str,
+    is_in_plural: bool,
+    literal_edges: Option<LiteralEdges>,
+) {
     let bytes = message.as_bytes();
     let mut literal_start = 0;
     let mut quoted_start = None;
@@ -161,7 +227,11 @@ fn write_escaped_message(out: &mut String, message: &str, is_in_plural: bool) {
         };
 
         if let Some(end) = end {
-            if quoted_start.is_some() && i == quoted_end {
+            // Apostrophes between two quoted spans join the span: closing and
+            // reopening a quote around them would pair the closing quote with them.
+            let joins_quoted_span = i == quoted_end
+                || (literal_edges.is_some() && bytes[quoted_end..i].iter().all(|&b| b == b'\''));
+            if quoted_start.is_some() && joins_quoted_span {
                 quoted_end = end;
             } else {
                 flush_quoted_syntax_token(
@@ -170,6 +240,7 @@ fn write_escaped_message(out: &mut String, message: &str, is_in_plural: bool) {
                     &mut literal_start,
                     &mut quoted_start,
                     quoted_end,
+                    literal_edges,
                 );
                 quoted_start = Some(i);
                 quoted_end = end;
@@ -186,8 +257,15 @@ fn write_escaped_message(out: &mut String, message: &str, is_in_plural: bool) {
         &mut literal_start,
         &mut quoted_start,
         quoted_end,
+        literal_edges,
     );
-    out.push_str(&message[literal_start..]);
+    write_unquoted_literal(
+        out,
+        &message[literal_start..],
+        literal_start,
+        None,
+        literal_edges,
+    );
 }
 
 /// Prints a literal text element with appropriate escaping.
@@ -212,26 +290,18 @@ fn write_literal_element(
     is_first_el: bool,
     is_last_el: bool,
 ) {
-    // If this literal starts with a ' and it's not the 1st node, this means the node before it is non-literal
-    // and the `'` needs to be unescaped (doubled) to preserve it
-    let needs_leading_quote_escape = !is_first_el && el.value.starts_with('\'');
-    let needs_trailing_quote_escape = !is_last_el && el.value.ends_with('\'');
-
-    if needs_leading_quote_escape || needs_trailing_quote_escape {
-        let mut escaped = el.value.clone();
-        if needs_leading_quote_escape {
-            escaped = format!("''{}", &escaped[1..]);
-        }
-
-        // Same logic but for the last element - preserve trailing quotes
-        if !is_last_el && escaped.ends_with('\'') {
-            escaped = format!("{}''", &escaped[..escaped.len() - 1]);
-        }
-
-        write_escaped_message(out, &escaped, is_in_plural);
-    } else {
-        write_escaped_message(out, &el.value, is_in_plural);
-    }
+    // An apostrophe at the start of a non-first literal or at the end of a
+    // non-last literal touches the neighbouring element's syntax, so it is
+    // doubled to keep it a literal apostrophe.
+    write_escaped_message(
+        out,
+        &el.value,
+        is_in_plural,
+        Some(LiteralEdges {
+            escape_start: !is_first_el,
+            escape_end: !is_last_el,
+        }),
+    );
 }
 
 /// Prints a simple argument reference.
@@ -343,7 +413,7 @@ fn write_number_skeleton_token(out: &mut String, token: &NumberSkeletonToken) {
 /// A string like `percent` or `::currency/USD`
 fn write_argument_style_number(out: &mut String, style: &NumberSkeletonOrStyle) {
     match style {
-        NumberSkeletonOrStyle::String(s) => write_escaped_message(out, s, false),
+        NumberSkeletonOrStyle::String(s) => write_escaped_message(out, s, false, None),
         NumberSkeletonOrStyle::Skeleton(skeleton) => {
             out.push_str("::");
             for (index, token) in skeleton.tokens.iter().enumerate() {
@@ -370,7 +440,7 @@ fn write_argument_style_number(out: &mut String, style: &NumberSkeletonOrStyle) 
 /// A string like `short` or `::yMMMd`
 fn write_argument_style_datetime(out: &mut String, style: &DateTimeSkeletonOrStyle) {
     match style {
-        DateTimeSkeletonOrStyle::String(s) => write_escaped_message(out, s, false),
+        DateTimeSkeletonOrStyle::String(s) => write_escaped_message(out, s, false, None),
         DateTimeSkeletonOrStyle::Skeleton(skeleton) => {
             out.push_str("::");
             out.push_str(&skeleton.pattern);

@@ -130,6 +130,32 @@ test('doubles a literal apostrophe abutting a quoted span', function () {
   )
 })
 
+test('GH issue #7882: escapes doubled apostrophes inside literals', function () {
+  expect(printAST(parse("a''''{x}"))).toBe("a''''{x}")
+  expect(printAST(parse("Say '''' for an apostrophe"))).toBe(
+    "Say '''' for an apostrophe"
+  )
+  for (const input of [
+    "a''''{x}",
+    "''''{x}",
+    "{x}''''",
+    "{x}''''{y}",
+    "a''''''b",
+    "a''''<b>c</b>",
+    "a''<3",
+    "a''> b",
+    "'}''s {x}",
+    "a'''}'''' b {x}",
+    "'{a}''''{b}'",
+    "<b>''''</b>",
+    "{n, plural, other {''''# ''''}}",
+    "{n, plural, other {''''#''''}}",
+  ]) {
+    const output = printAST(parse(input))
+    expect(parse(output), `printed message: ${output}`).toEqual(parse(input))
+  }
+})
+
 // printAST must emit plural/select branches in a deterministic, source-order-
 // independent order so that auto-generated message ids match the Rust extractor
 // (formatjs_cli) regardless of how branches were authored. See printer.rs:

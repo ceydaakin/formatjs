@@ -78,6 +78,36 @@ fn test_print_apostrophe_before_quoted_span_round_trip() {
 }
 
 #[test]
+fn test_print_doubled_apostrophes_inside_literals() {
+    assert_eq!(print_ast(&parse_message("a''''{x}")), "a''''{x}");
+    assert_eq!(
+        print_ast(&parse_message("Say '''' for an apostrophe")),
+        "Say '''' for an apostrophe"
+    );
+    for input in [
+        "a''''{x}",
+        "''''{x}",
+        "{x}''''",
+        "{x}''''{y}",
+        "a''''''b",
+        "a''''<b>c</b>",
+        "a''<3",
+        "a''> b",
+        "'}''s {x}",
+        "a'''}'''' b {x}",
+        "'{a}''''{b}'",
+        "<b>''''</b>",
+        "{n, plural, other {''''# ''''}}",
+        "{n, plural, other {''''#''''}}",
+    ] {
+        let ast = parse_message(input);
+        let output = print_ast(&ast);
+
+        assert_eq!(parse_message(&output), ast, "printed message: {output}");
+    }
+}
+
+#[test]
 fn test_print_literal_pounds_inside_plural_tag_round_trip() {
     let ast = parse_message("{count, plural, other {<b>'##'</b>}}");
     let output = print_ast(&ast);

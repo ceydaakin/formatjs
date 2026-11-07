@@ -97,7 +97,62 @@ function findBraceSyntaxEnd(message: string, index: number): number {
   return closingIndex === -1 ? index + 1 : closingIndex + 1
 }
 
-function printEscapedMessage(message: string, isInPlural = false): string {
+/**
+ * Doubles each run of apostrophes in unquoted literal text that the parser
+ * would otherwise read as an escape or a quote start: runs of two or more
+ * (`''` reads back as one `'`), runs before `<` or `>`, and runs at an edge
+ * that touches syntax (a quoted span, an argument or a tag).
+ */
+function escapeLiteralApostrophes(
+  text: string,
+  escapeStart: boolean,
+  escapeEnd: boolean
+): string {
+  let result = ''
+  let i = 0
+  while (i < text.length) {
+    if (text[i] !== "'") {
+      result += text[i]
+      i++
+      continue
+    }
+    let end = i
+    while (text[end] === "'") {
+      end++
+    }
+    const run = text.slice(i, end)
+    const next = text[end]
+    const mustDouble =
+      run.length > 1 ||
+      next === '<' ||
+      next === '>' ||
+      (i === 0 && escapeStart) ||
+      (end === text.length && escapeEnd)
+    result += mustDouble ? run + run : run
+    i = end
+  }
+  return result
+}
+
+function isApostropheRun(text: string): boolean {
+  for (const ch of text) {
+    if (ch !== "'") {
+      return false
+    }
+  }
+  return true
+}
+
+interface LiteralEdges {
+  escapeStart: boolean
+  escapeEnd: boolean
+}
+
+function printEscapedMessage(
+  message: string,
+  isInPlural = false,
+  literalEdges?: LiteralEdges
+): string {
   let result = ''
   let literalStart = 0
   let quotedStart = -1
@@ -109,9 +164,17 @@ function printEscapedMessage(message: string, isInPlural = false): string {
     }
 
     const literal = message.slice(literalStart, quotedStart)
-    result += literal
-    if (literal.endsWith("'")) {
-      result += "'"
+    if (literalEdges) {
+      result += escapeLiteralApostrophes(
+        literal,
+        literalStart === 0 ? literalEdges.escapeStart : true,
+        true
+      )
+    } else {
+      result += literal
+      if (literal.endsWith("'")) {
+        result += "'"
+      }
     }
     result += quoteSyntaxToken(message.slice(quotedStart, quotedEnd))
     literalStart = quotedEnd
@@ -119,7 +182,14 @@ function printEscapedMessage(message: string, isInPlural = false): string {
   }
 
   function quoteToken(start: number, end: number) {
-    if (quotedStart !== -1 && start === quotedEnd) {
+    // Apostrophes between two quoted spans join the span: closing and
+    // reopening a quote around them would pair the closing quote with them.
+    if (
+      quotedStart !== -1 &&
+      (start === quotedEnd ||
+        (literalEdges !== undefined &&
+          isApostropheRun(message.slice(quotedEnd, start))))
+    ) {
       quotedEnd = end
       return
     }
@@ -147,7 +217,18 @@ function printEscapedMessage(message: string, isInPlural = false): string {
   }
 
   flushQuotedToken()
-  return result + message.slice(literalStart)
+  const tail = message.slice(literalStart)
+  if (!literalEdges) {
+    return result + tail
+  }
+  return (
+    result +
+    escapeLiteralApostrophes(
+      tail,
+      literalStart === 0 ? literalEdges.escapeStart : true,
+      literalEdges.escapeEnd
+    )
+  )
 }
 
 function printLiteralElement(
@@ -156,17 +237,13 @@ function printLiteralElement(
   isFirstEl: boolean,
   isLastEl: boolean
 ) {
-  let escaped = value
-  // If this literal starts with a ' and its not the 1st node, this means the node before it is non-literal
-  // and the `'` needs to be unescaped
-  if (!isFirstEl && escaped[0] === `'`) {
-    escaped = `''${escaped.slice(1)}`
-  }
-  // Same logic but for last el
-  if (!isLastEl && escaped[escaped.length - 1] === `'`) {
-    escaped = `${escaped.slice(0, escaped.length - 1)}''`
-  }
-  return printEscapedMessage(escaped, isInPlural)
+  // An apostrophe at the start of a non-first literal or at the end of a
+  // non-last literal touches the neighbouring element's syntax, so it is
+  // doubled to keep it a literal apostrophe.
+  return printEscapedMessage(value, isInPlural, {
+    escapeStart: !isFirstEl,
+    escapeEnd: !isLastEl,
+  })
 }
 
 function printArgumentElement({value}: ArgumentElement) {
