@@ -186,6 +186,18 @@ const numberSkeletonResults = {
     unit: 'meter',
     unitDisplay: 'long',
   },
+  'unit/meter': {
+    style: 'unit',
+    unit: 'meter',
+  },
+  'unit/fluid-ounce': {
+    style: 'unit',
+    unit: 'fluid-ounce',
+  },
+  'unit/kilometer-per-hour': {
+    style: 'unit',
+    unit: 'kilometer-per-hour',
+  },
   'compact-short': {
     compactDisplay: 'short',
     notation: 'compact',

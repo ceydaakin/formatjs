@@ -324,10 +324,19 @@ pub fn parse_number_skeleton(
                 result = result.with_maximum_fraction_digits(0);
                 continue;
             }
-            "measure-unit" | "unit" => {
+            "measure-unit" => {
                 result = result.with_style(NumberFormatOptionsStyle::Unit);
                 if let Some(unit) = token.options().first() {
                     result = result.with_unit(icu_unit_to_ecma(unit));
+                }
+                continue;
+            }
+            // `unit/` takes a core unit identifier with no type prefix
+            // (`unit/fluid-ounce`), so it is passed through as-is.
+            "unit" => {
+                result = result.with_style(NumberFormatOptionsStyle::Unit);
+                if let Some(unit) = token.options().first() {
+                    result = result.with_unit(unit);
                 }
                 continue;
             }

@@ -499,7 +499,7 @@ fn test_parse_number_skeleton_currency() {
 
 #[test]
 fn test_parse_number_skeleton_unit() {
-    let tokens = NumberSkeletonToken::parse_from_string("unit/length-meter").unwrap();
+    let tokens = NumberSkeletonToken::parse_from_string("unit/meter").unwrap();
     let result = parse_number_skeleton(&tokens).unwrap();
     assert_eq!(result.style(), Some(&NumberFormatOptionsStyle::Unit));
     assert_eq!(result.unit(), Some("meter"));
@@ -1196,4 +1196,24 @@ fn unit_from_skeleton(unit: &str) -> String {
         .unit()
         .unwrap()
         .to_owned()
+}
+
+fn unit_from_unit_stem(unit: &str) -> String {
+    let token = NumberSkeletonToken::new("unit".to_owned(), vec![unit.to_owned()]);
+    parse_number_skeleton(&[token])
+        .unwrap()
+        .unit()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn test_unit_stem_keeps_core_unit_identifier() {
+    // GH issue #7883: `unit/` takes a core unit without a type prefix.
+    assert_eq!(unit_from_unit_stem("meter"), "meter");
+    assert_eq!(unit_from_unit_stem("fluid-ounce"), "fluid-ounce");
+    assert_eq!(
+        unit_from_unit_stem("kilometer-per-hour"),
+        "kilometer-per-hour"
+    );
 }
